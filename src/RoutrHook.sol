@@ -118,14 +118,16 @@ contract RoutrHook is IUnlockCallback {
         return IHooks.afterInitialize.selector;
     }
 
-    /// @notice Every removal callback reverts, including zero-liquidity fee collection.
-    function beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+    /// @notice Every removal of liquidity reverts for every caller. A zero liquidity change removes no
+    ///         principal and is v4's only way to collect accrued LP fees, so it is let through with no delta.
+    function beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata params, bytes calldata)
         external
         view
         onlyPoolManager
         returns (bytes4)
     {
-        revert LiquidityLocked();
+        if (params.liquidityDelta != 0) revert LiquidityLocked();
+        return IHooks.beforeRemoveLiquidity.selector;
     }
 
     /// @dev When ETH is specified, charge it here; otherwise its actual amount is known only afterSwap.
@@ -184,8 +186,8 @@ contract RoutrHook is IUnlockCallback {
             grossETH = params.zeroForOne ? ammETH + fee : ammETH;
         } else {
             if (params.zeroForOne) {
-                if (int256(delta.amount1()) != params.amountSpecified) revert PartialFill();
-                // Exact-output buy: add the fee to actual AMM input, on the same gross-ETH basis.
+                // Exact-output buy: add the fee to actual AMM input, on the same gross-ETH basis. A partial
+                // fill at the price limit is charged on the ETH actually swapped.
                 fee = ammETH * FEE_BPS / (BPS - FEE_BPS);
                 grossETH = ammETH + fee;
                 grossETH.toInt128();

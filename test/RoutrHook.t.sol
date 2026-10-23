@@ -172,19 +172,45 @@ contract RoutrHookTest is HookTestBase {
         assertEq(address(attacker).balance + hook.credits(address(attacker)), 0.3 ether);
     }
 
-    function test_removeLiquidityAndZeroDeltaAlwaysRevert() public {
+    function test_removeLiquidityAlwaysReverts() public {
         uint128 beforeLiquidity = IPoolManager(manager).getLiquidity(key.toId());
         vm.expectRevert();
         router.modify(key, ModifyLiquidityParams(-600, 600, -1 ether, bytes32(0)));
         vm.expectRevert();
-        router.modify(key, ModifyLiquidityParams(-600, 600, 0, bytes32(0)));
+        router.modify(key, ModifyLiquidityParams(-600, 600, -1, bytes32(0)));
         assertEq(IPoolManager(manager).getLiquidity(key.toId()), beforeLiquidity);
     }
 
+    function test_zeroDeltaCollectsLPFeesWithoutRemovingPrincipal() public {
+        router.swap(key, _params(true, -10 ether), false);
+        router.swap(key, _params(false, -10 ether), false);
+        uint128 beforeLiquidity = IPoolManager(manager).getLiquidity(key.toId());
+        uint256 vaultBefore = address(research).balance;
+        BalanceDelta collected = router.modify(key, ModifyLiquidityParams(-600, 600, 0, bytes32(0)));
+        assertGt(collected.amount0(), 0, "ETH LP fees");
+        assertGt(collected.amount1(), 0, "token LP fees");
+        assertEq(IPoolManager(manager).getLiquidity(key.toId()), beforeLiquidity, "principal locked");
+        assertEq(address(research).balance, vaultBefore, "collect pays no hook fee");
+        // A second collect returns nothing, and removal still reverts afterwards.
+        collected = router.modify(key, ModifyLiquidityParams(-600, 600, 0, bytes32(0)));
+        assertEq(collected.amount0(), 0);
+        assertEq(collected.amount1(), 0);
+        vm.expectRevert();
+        router.modify(key, ModifyLiquidityParams(-600, 600, -1, bytes32(0)));
+    }
+
     function testFuzz_allRemovalSendersRevert(address sender, int128 liquidity) public {
+        vm.assume(liquidity != 0);
+        if (liquidity > 0) liquidity = -liquidity;
         vm.prank(address(manager));
         vm.expectRevert(RoutrHook.LiquidityLocked.selector);
         hook.beforeRemoveLiquidity(sender, key, ModifyLiquidityParams(-600, 600, liquidity, bytes32(0)), "");
+    }
+
+    function testFuzz_zeroDeltaAllowedForAnySender(address sender) public {
+        vm.prank(address(manager));
+        bytes4 selector = hook.beforeRemoveLiquidity(sender, key, ModifyLiquidityParams(-600, 600, 0, bytes32(0)), "");
+        assertEq(selector, IHooks.beforeRemoveLiquidity.selector);
     }
 
     function test_callbacksOnlyPoolManager() public {
@@ -274,12 +300,24 @@ contract RoutrHookTest is HookTestBase {
         _assertSwap(true, -1 ether);
     }
 
-    function test_partialExactOutputSellAndBuyRevert() public {
+    function test_partialExactOutputSellReverts() public {
         vm.expectRevert();
         router.swap(key, SwapParams(false, 100 ether, TickMath.getSqrtPriceAtTick(1)), false);
-        vm.expectRevert();
-        router.swap(key, SwapParams(true, 100 ether, TickMath.getSqrtPriceAtTick(-1)), false);
         assertEq(hook.totalCredits(), 0);
+    }
+
+    function test_exactOutputBuyAtPriceLimitPartiallyFillsAndPaysOnActualETH() public {
+        vm.recordLogs();
+        BalanceDelta delta = router.swap(key, SwapParams(true, 100 ether, TickMath.getSqrtPriceAtTick(-1)), false);
+        (int128 coreETH,) = _coreDelta(vm.getRecordedLogs());
+        uint256 ammETH = uint256(-int256(coreETH));
+        uint256 fee = ammETH * 200 / 9_800;
+        uint256 gross = ammETH + fee;
+        assertGt(ammETH, 0);
+        assertLt(uint256(int256(delta.amount1())), 100 ether);
+        assertEq(uint256(-int256(delta.amount0())), gross);
+        assertEq(address(research).balance, gross * 150 / 10_000);
+        assertEq(address(research).balance + address(team).balance, fee);
     }
 
     function test_sequentialSwapsInOneUnlockClearTransientState() public {
