@@ -1,0 +1,35 @@
+{
+  "kind": "univ4_hook",
+  "hook": {
+    "contract": "RoutrHook",
+    "constructorArgs": [
+      "$poolManager",
+      "$token",
+      "0x087c0cf0a103aca2c487c5017dbc121ad6c5afee",
+      "0x5cf44fb6a49156125b5f9dfea73e4011534c7944"
+    ],
+    "permissions": [
+      "afterInitialize",
+      "beforeRemoveLiquidity",
+      "beforeSwap",
+      "afterSwap",
+      "beforeSwapReturnDelta",
+      "afterSwapReturnDelta"
+    ]
+  },
+  "token": {
+    "contract": "RoutrToken",
+    "name": "Routr",
+    "symbol": "ROUTR",
+    "decimals": 18,
+    "constructorArgs": [],
+    "totalSupply": "1000000000000000000000000000"
+  },
+  "pool": {
+    "pairedCurrency": "0x0000000000000000000000000000000000000000",
+    "fee": 12500,
+    "tickSpacing": 60,
+    "initialPrice": "79228162514264337593543950336"
+  },
+  "notes": "RoutrToken has no constructor arguments and mints its entire fixed supply of 1,000,000,000 ROUTR (18 decimals) once to msg.sender, the deploying factory. It has plain ERC-20 transfers and no owner, mint, burn, pause, blacklist or transfer tax. WEBSITE is https://imdroutr.network and TWITTER is https://x.com/routr_network; DESCRIPTION and the NatSpec metadata match the brief. RoutrHook's immutable constructor arguments are PoolManager, launch token, research vault and team wallet, in that order. It has no owner, administrator or configurable fee. From the first trade, the hook charges 2% of gross ETH on exact-input and exact-output buys and sells, separate from the pool's 1.25% LP fee. Gross ETH is the buyer's total ETH input including the hook fee or the seller's ETH output before that fee. Research receives floor(grossETH * 150 / 10000); the team receives the remainder of floor(grossETH * 200 / 10000), including at most one wei of split-rounding dust. beforeSwap and afterSwap use return deltas and EIP-1153 transient state. With sufficient PoolManager ETH, recipients are paid during afterSwap; failed payments remain withdrawable credits. If PoolManager lacks ETH before router settlement, including a first buy on a fresh token-only pool, the hook instead mints native ERC-6909 claims backing recipient credits. Anyone can call flush() after settlement to redeem claims and retry fixed-recipient payments, including within the same unlock; a credited recipient can withdraw(to). Without that router integration, first-trade payment may require a later call. afterInitialize binds exactly once to native ETH / ROUTR, this hook, fee 12500 and tick spacing 60; callbacks accept only PoolManager. beforeRemoveLiquidity reverts every nonzero liquidity change for every caller, so no principal can ever be removed; a zero liquidity change (the launch factory's LP fee collect) passes with no delta and no owner switch, and afterRemoveLiquidity is not enabled. Token-only initial liquidity is supported, with buyers supplying ETH. ETH-specified swaps and exact-output buys revert on partial fills; exact-input sells charge on actual ETH output. Deploy at an address whose low 14 permission bits equal 0x12cc and initialize atomically. pool.initialPrice records the supplied launch reference value; the deployer derives the actual opening price under the separate launch policy."
+}
